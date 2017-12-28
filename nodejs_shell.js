@@ -1,10 +1,14 @@
 const express = require('express');
+const plotly = require('plotly')('onaries', 'fKMXvNNHAMPJyHDaoXXH');
 const http = require('http').Server(express);
 const io = require('socket.io')(http);
+const util = require('util');
+const push = require('push.js');
 const dateUtil = require('date-utils');
 const CSV = require('csvtojson').Converter;
 const StatsD = require('hot-shots');
 const exec = require('child_process').exec;
+const execSync = require('child_process').execSync;
 const params = [
     'index',
     'name',
@@ -34,6 +38,9 @@ var server = app.listen(8088, function(){
     console.log("Express server has started on port 8088")
 });
 
+var initData = [{x:[], y:[], stream:{token:'884y57pb97', maxpoints:200}}];
+var initGraphOptions = {fileopt : "extend", filename : "nodenodenode"};
+
 function reportGpuStats(gpu){
     const gpuNum = parseInt(gpu['index'],10);
     const gpuName = gpu['name'];
@@ -44,20 +51,6 @@ function reportGpuStats(gpu){
     const gpuFanSpeed = parseInt(gpu['fan.speed [%]'],10);
     const gpuUtilization = parseInt(gpu['utilization.gpu [%]'].replace(' %',''),10)
     const gpuTemperature = parseInt(gpu['temperature.gpu'], 10)
-
-    const tags = [
-        `gpus:${gpu.count}`,
-        `name:${gpu.name}`,
-        `driver:${gpu.driver_version}`,
-        `uuid:${gpu.uuid}`
-    ];
-
-    if(gpu.display_mode !== ''){
-        tags.push(
-            `screen_connected:${gpu.display_mode}`,
-            `screen_active:${gpu.display_active}`
-        );
-    }
 
     var availability = "unavailable";
     // 사용 가능한지 확인
@@ -75,27 +68,10 @@ function reportGpuStats(gpu){
     global.dataString += "fan speed : " + gpuFanSpeed + '% <br/>';
     global.dataString += "utilization : " + gpuUtilization + '% <p></p>';
 
-
     console.log("gpu" + gpuNum);
     console.log("used : " + gpuUsed);
     console.log("total : " + gpuTotal);
     console.log("percent : " + percentUsed);
-    // Client.gauge('fan', gpu['fan.speed [%]'], tags);
-    // Client.gauge('pstate', gpu.pstate.replace('P',''), tags);
-    // Client.gauge('pcie.generation', gpu['pcie.link.gen.current'], tags);
-    // Client.gauge('pcie.speed', gpu['pcie.link.width.current'], tags);
-    // Client.gauge('memory.used', gpuUsed, tags);
-    // Client.gauge('memory.free', gpu['memory.free [MiB]'].replace(' MiB',''), tags);
-    // Client.gauge('memory.total', gpuTotal, tags);
-    // Client.gauge('memory.pct', percentUsed, tags);
-    // Client.gauge('utilization', gpu['utilization.gpu [%]'].replace(' %',''), tags);
-    // Client.gauge('temperature.celsius', gpu['temperature.gpu'], tags);
-    // Client.gauge('temperature.fahrenheit', (gpu['temperature.gpu'] * 1.8 + 32).toFixed(0), tags);
-    // Client.gauge('watts', gpu['power.draw [W]'].replace(' W',''), tags);
-    // Client.gauge('clock.shader', gpu['clocks.current.graphics [MHz]'].replace(' MHz',''), tags);
-    // Client.gauge('clock.streaming', gpu['clocks.current.sm [MHz]'].replace(' MHz',''), tags);
-    // Client.gauge('clock.memory', gpu['clocks.current.memory [MHz]'].replace(' MHz',''), tags);
-    // Client.gauge('clock.encoder', gpu['clocks.current.video [MHz]'].replace(' MHz',''), tags);
 }
 
 function parseData(data,next){
@@ -155,54 +131,33 @@ function queryGpus(){
 
                 }
                 else {
+
                     var arr = result.slice(105);
-                    arr = arr.trim();
-                    arr = arr.split(/\s+/);
+                    var arr2 = arr.trim();
+                    arr2 = arr2.split(/\s+/);
+                    global.dataString += "<b> GPU Process </b></br>";
                     
-                    var query3 = `ps -o user= -p ` + arr[1];
-                    exec(query3, (err, result) => {
-                        if(err){
-                        } else {
-                            global.dataString += "gpu0 : " + result;
+                    for (var j = 0; j < arr.split('\n').length - 1; j++){
 
+                        var gpuIndex = arr2[j*8];
+                        var pid = arr2[j*8+1];
+                        var pname = arr2[j*8+7];
+
+                        var query3 = 'ps -o user= -p ' + pid;
+
+                        
+                        if (!isNaN(parseInt(pid))){
                             
+                            // console.log(query3);
+                            var result2 = execSync(query3).toString();
+                            // console.log(result2);
+                            global.dataString += "gpu" + gpuIndex + " : " + result2 + "| pid : " + pid + " | process : " + pname + '</br>';
                         }
-                    });
-
-                    var query3 = `ps -o user= -p ` + arr[9];
-                    exec(query3, (err, result) => {
-                        if(err){
-                        } else {
-                            global.dataString += "gpu1 : " + result;
-
-                            
-                        }
-                    });
-
-                    var query3 = `ps -o user= -p ` + arr[17];
-                    exec(query3, (err, result) => {
-                        if(err){
-                        } else {
-                            global.dataString += "gpu2 : " + result;
-
-                            
-                        }
-                    });
-
-                    var query3 = `ps -o user= -p ` + arr[25];
-                    exec(query3, (err, result) => {
-                        if(err){
-                        } else {
-                            global.dataString += "gpu3 : " + result;
-                        }
-                    });
-                }
-
-                
-            });
-           
+                    }                    
+                }       
+            });    
             parseData(result,reportGpuStats);
-            
+
         }
     });
 
@@ -217,6 +172,23 @@ exec('nvidia-smi',(err) =>{
         console.log('nVidia SMI found, beginning loop and reporting');
         setInterval(queryGpus,10000);
         queryGpus();
-        
+        // plotly 그래프
+        plotly.plot(initData, initGraphOptions, function (err, msg) {
+          if (err) return console.log(err)
+          console.log(msg);
+
+        // 그래프 스트리밍
+        //   var stream1 = plotly.stream('884y57pb97', function (err, res) {
+        //     console.log(err, res);
+        //     clearInterval(loop); // once stream is closed, stop writing
+        //   });
+
+        //   var i = 0;
+        //   var loop = setInterval(function () {
+        //       var streamObject = JSON.stringify({ x : i, y : i });
+        //       stream1.write(streamObject+'\n');
+        //       i++;
+        //   }, 1000);
+        });
     }
 });
