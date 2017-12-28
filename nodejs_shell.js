@@ -151,7 +151,11 @@ function queryGpus(){
                             // console.log(query3);
                             var result2 = execSync(query3).toString();
                             // console.log(result2);
-                            global.dataString += "gpu" + gpuIndex + " : " + result2 + "| pid : " + pid + " | process : " + pname + '</br>';
+                            global.dataString += "gpu" + gpuIndex + " : " + result2 + "| pid : " + pid + " | process : " + pname;
+
+                            // 사용시간 획득
+                            var result3 = execSync('ps -p ' + pid + ' -o etime=').toString();
+                            global.dataString += " | time : " + result3 + '</br>';
                         }
                     }                    
                 }       
